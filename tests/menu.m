@@ -71,7 +71,7 @@ static bool saved_on_by_default(void) {
 }
 
 struct knit_gauge g_knit = {.rows = 6};
-int g_knit_stitch, g_knit_basket, g_knit_anchor;
+int g_knit_stitch, g_knit_basket, g_knit_anchor, g_knit_inactive;
 bool g_knit_on = true, g_knit_pattern_by_app = true;
 const char* g_knit_stitch_names[] = {"stockinette", "rib", "garter"};
 static const uint32_t basket[] = {0xff123456, 0xffabcdef};
@@ -108,6 +108,9 @@ void knit_apply(const char* argument) {
   } else if (sscanf(argument, "gauge=%f", &g_knit.rows) == 1) {
   } else if (sscanf(argument, "width=%f", &current_width) == 1) {
   } else if (!strncmp(argument, "knit=", 5)) g_knit_on = !strcmp(argument + 5, "on");
+  else if (!strcmp(argument, "inactive=same")) g_knit_inactive = KNIT_INACTIVE_SAME;
+  else if (!strcmp(argument, "inactive=grey")) g_knit_inactive = KNIT_INACTIVE_GREY;
+  else if (!strcmp(argument, "inactive=bare")) g_knit_inactive = KNIT_INACTIVE_BARE;
 }
 
 static int add_chart(const char* name, int height) {
@@ -253,6 +256,38 @@ static void test_apps(KnitMenu* controller, NSMenu* menu) {
   knit_apps_set_all(true);
 }
 
+// One choice for unfocused windows: ticked truthfully, saved, and restored.
+static void test_inactive(KnitMenu* controller, NSMenu* menu) {
+  KnitTestDefaults* defaults = [KnitTestDefaults standardUserDefaults];
+  g_knit_inactive = KNIT_INACTIVE_SAME;
+  [controller rebuild:menu];
+  NSMenu* inactive = submenu(menu, @"Inactive Windows");
+  assert([titles(inactive) isEqualToArray:(@[@"Same Sweater", @"Black and White", @"No Sweater"])]);
+  assert([inactive itemWithTitle:@"Same Sweater"].state == NSControlStateValueOn);
+  assert(checked_count(inactive) == 1);
+  check_actions(menu);
+
+  [controller apply:[inactive itemWithTitle:@"Black and White"]];
+  assert(g_knit_inactive == KNIT_INACTIVE_GREY);
+  assert([defaults integerForKey:@"inactive"] == KNIT_INACTIVE_GREY);
+  [controller rebuild:menu];
+  inactive = submenu(menu, @"Inactive Windows");
+  assert([inactive itemWithTitle:@"Black and White"].state == NSControlStateValueOn);
+  assert(checked_count(inactive) == 1);
+
+  [controller apply:[inactive itemWithTitle:@"No Sweater"]];
+  assert(g_knit_inactive == KNIT_INACTIVE_BARE);
+  assert([defaults integerForKey:@"inactive"] == KNIT_INACTIVE_BARE);
+
+  // Restored at launch; a value out of range falls back to the same sweater.
+  g_knit_inactive = KNIT_INACTIVE_SAME;
+  knit_load_prefs();
+  assert(g_knit_inactive == KNIT_INACTIVE_BARE);
+  [defaults setInteger:7 forKey:@"inactive"];
+  knit_load_prefs();
+  assert(g_knit_inactive == KNIT_INACTIVE_SAME);
+}
+
 int main(void) {
   @autoreleasepool {
     for (size_t i = 0; i < sizeof knit_menu_patterns / sizeof knit_menu_patterns[0]; i++)
@@ -282,7 +317,7 @@ int main(void) {
     menu.autoenablesItems = NO;
     [controller rebuild:menu];
     NSArray* expected = @[@"Show Sweater Borders", @"Apps", @"Pattern", @"Border Width", @"Stitch Size",
-                         @"", @"Quit Window Sweaters"];
+                         @"Inactive Windows", @"", @"Quit Window Sweaters"];
     assert(menu.numberOfItems == expected.count);
     for (NSInteger i = 0; i < menu.numberOfItems; i++)
       assert([[menu itemAtIndex:i].title isEqualToString:expected[i]]);
@@ -386,6 +421,8 @@ int main(void) {
     assert([[KnitTestDefaults standardUserDefaults] floatForKey:@"gauge"] == 6);
     test_listing();
     test_apps(controller, menu);
+    test_inactive(controller, menu);
+    puts("PASS: inactive windows: same, black and white, or bare; ticked, saved, restored");
     puts("PASS: per-app switches: listing rules, sorted, truthful, persisted, reversible, all on and all off");
     puts("PASS: native menu structure, truthful state, working selections, chart filtering, gauge limits, cached swatches");
   }

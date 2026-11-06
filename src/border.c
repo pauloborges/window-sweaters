@@ -106,7 +106,9 @@ static void border_draw(struct border* border, CGRect frame, struct settings* se
 
   if (settings->border_style == BORDER_STYLE_KNIT) {
     CGContextClearRect(border->context, frame);
-    if (!g_knit_on) {
+    // An unfocused window with no sweater keeps a clear overlay, the same as
+    // knit=off. A hidden overlay would be shown again by snapshot recovery.
+    if (!g_knit_on || (g_knit_inactive == KNIT_INACTIVE_BARE && !border->focused)) {
       CGContextFlush(border->context);
       CGContextRestoreGState(border->context);
       SLSFlushWindowContentRegion(border->cid, border->wid, NULL);
@@ -133,15 +135,16 @@ static void border_draw(struct border* border, CGRect frame, struct settings* se
       }
     }
 
-    knit_draw(border->context,
-              border->drawing_bounds,
-              border->radius,
-              settings->border_width,
-              yarn,
-              chart,
-              border->focused ? 0.f : g_knit_dim,
-              // drawn above the window, a deep tuck would cover its content
-              settings->border_order == BORDER_ORDER_ABOVE ? 1.f : g_knit.tuck);
+    knit_draw_styled(border->context,
+                     border->drawing_bounds,
+                     border->radius,
+                     settings->border_width,
+                     yarn,
+                     chart,
+                     border->focused ? 0.f : g_knit_dim,
+                     // drawn above the window, a deep tuck would cover its content
+                     settings->border_order == BORDER_ORDER_ABOVE ? 1.f : g_knit.tuck,
+                     !border->focused && g_knit_inactive == KNIT_INACTIVE_GREY);
     CGContextFlush(border->context);
     CGContextRestoreGState(border->context);
     SLSFlushWindowContentRegion(border->cid, border->wid, NULL);

@@ -277,6 +277,13 @@ void windows_window_resize(struct table* windows, uint32_t wid) {
   }
 }
 
+// A knit border looks the same focused or not unless the inactive windows are
+// dimmed, black and white, or bare. Only then does a focus change need a repaint.
+static bool windows_focus_changes_pixels(struct border* border) {
+  return border_get_settings(border)->border_style != BORDER_STYLE_KNIT
+         || g_knit_dim > 0.f || g_knit_inactive != KNIT_INACTIVE_SAME;
+}
+
 static bool windows_window_focus(struct table* windows, uint32_t wid) {
   bool found_window = false;
   for (int i = 0; i < windows->capacity; ++i) {
@@ -287,18 +294,16 @@ static bool windows_window_focus(struct table* windows, uint32_t wid) {
         if (border->focused && border->target_wid != wid) {
           border->focused = false;
           border->metadata_dirty = true;
-          // With dimming off, knit focus changes do not change any pixels.
-          // Still update ordering, but avoid repainting both entire borders.
-          if (border_get_settings(border)->border_style != BORDER_STYLE_KNIT
-              || g_knit_dim > 0.f) border->needs_redraw = true;
+          // If focus does not change any pixels, still update ordering, but
+          // avoid repainting both entire borders.
+          if (windows_focus_changes_pixels(border)) border->needs_redraw = true;
           border_update(border, true);
         }
 
         if (!border->focused && border->target_wid == wid) {
           border->focused = true;
           border->metadata_dirty = true;
-          if (border_get_settings(border)->border_style != BORDER_STYLE_KNIT
-              || g_knit_dim > 0.f) border->needs_redraw = true;
+          if (windows_focus_changes_pixels(border)) border->needs_redraw = true;
           border_update(border, true);
         }
 

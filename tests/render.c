@@ -3,6 +3,7 @@
 #include <mach/mach_time.h>
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "misc/knit.h"
 #include "misc/chart.h"
@@ -601,10 +602,51 @@ static void verify_equal_patches(void) {
   puts("PASS: equal patch extents on every edge at varied sizes, both anchors and 1x/2x; Paper unpatched");
 }
 
+// Black and white: every wool pixel is grey, chart, cuff and corner yarns too.
+// The band stays opaque, the inside and outside stay transparent, and the
+// cached colour tiles are not changed by a greyscale draw.
+static void verify_greyscale(void) {
+  const char* charts[] = {"atelier-spotify", "atelier-paper", "zigzag"};
+  for (int n = 0; n < 3; n++) {
+    int chart = knit_chart_index(charts[n]);
+    assert(chart >= 0);
+    for (int s = 1; s <= 2; s++) {
+      CGContextRef colour = canvas(360, 240, s), grey = canvas(360, 240, s);
+      CGRect win = CGRectMake(40, 40, 280, 160);
+      knit_draw(colour, win, 10, 14, 0xffd1495b, chart, 0, 1);
+      knit_draw_styled(grey, win, 10, 14, 0xffd1495b, chart, 0, 1, true);
+      int coloured = 0, wool = 0;
+      for (int y = 0; y < 240 * s; y++)
+        for (int x = 0; x < 360 * s; x++) {
+          uint32_t c = pixel(colour, x, y), g = pixel(grey, x, y);
+          assert((c >> 24) == (g >> 24));   // same shape and opacity
+          if ((g >> 24) != 255) continue;
+          wool++;
+          int r = (g >> 16) & 255, gr = (g >> 8) & 255, b = g & 255;
+          assert(abs(r - gr) <= 2 && abs(gr - b) <= 2 && abs(r - b) <= 2);
+          int cr = (c >> 16) & 255, cg = (c >> 8) & 255, cb = c & 255;
+          coloured += abs(cr - cg) > 8 || abs(cg - cb) > 8;
+        }
+      assert(wool > 0 && coloured > wool / 2);   // the colour draw was in colour
+      assert(pixel(grey, 180 * s, 120 * s) == 0);  // content stays transparent
+      assert(pixel(grey, 5 * s, 5 * s) == 0);      // outside stays transparent
+      // A colour draw after a greyscale draw is still in colour.
+      CGContextRef again = canvas(360, 240, s);
+      knit_draw(again, win, 10, 14, 0xffd1495b, chart, 0, 1);
+      assert(memcmp(CGBitmapContextGetData(colour), CGBitmapContextGetData(again),
+                    CGBitmapContextGetBytesPerRow(colour) * CGBitmapContextGetHeight(colour)) == 0);
+      CGContextRelease(colour); CGContextRelease(grey); CGContextRelease(again);
+    }
+  }
+  knit_flush_cache();
+  puts("PASS: black and white for chart, cuff and corner yarns at 1x/2x; shape, transparency and colour cache kept");
+}
+
 static void verify(void) {
   verify_corners();
   verify_equal_patches();
   verify_curved_cuff();
+  verify_greyscale();
   int chart=knit_chart_index("atelier-paper");
   for(int s=1;s<=2;s++) {
     CGContextRef a=canvas(520,400,s), b=canvas(520,400,s);

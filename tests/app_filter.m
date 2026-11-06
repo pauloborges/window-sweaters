@@ -124,6 +124,7 @@ struct settings g_settings;
 pid_t g_pid = 1;
 int g_knit_trace;
 float g_knit_dim;
+int g_knit_inactive;
 CFArrayRef (*JBSLSWindowIteratorGetCornerRadii)(CFTypeRef);
 static int created, destroyed;
 

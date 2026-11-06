@@ -163,6 +163,19 @@ uint32_t parse_settings(struct settings* settings, int count, char** arguments) 
     else if (sscanf(arguments[i], "dim=%f", &g_knit_dim) == 1) {
       update_mask |= BORDER_UPDATE_MASK_ALL;
     }
+    else if (strcmp(arguments[i], "inactive=same") == 0) {
+      g_knit_inactive = KNIT_INACTIVE_SAME;
+      update_mask |= BORDER_UPDATE_MASK_ALL;
+    }
+    else if (strcmp(arguments[i], "inactive=grey") == 0
+             || strcmp(arguments[i], "inactive=gray") == 0) {
+      g_knit_inactive = KNIT_INACTIVE_GREY;
+      update_mask |= BORDER_UPDATE_MASK_ALL;
+    }
+    else if (strcmp(arguments[i], "inactive=bare") == 0) {
+      g_knit_inactive = KNIT_INACTIVE_BARE;
+      update_mask |= BORDER_UPDATE_MASK_ALL;
+    }
     else if (sscanf(arguments[i], "ground=%f", &g_knit.ground) == 1) {
       knit_flush_cache();
       update_mask |= BORDER_UPDATE_MASK_ALL;

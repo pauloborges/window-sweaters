@@ -177,6 +177,7 @@ static void knit_save_prefs(void) {
         forKey:@"chart"];
   [d setBool:g_knit_pattern_by_app forKey:@"patternByApp"];
   [d setInteger:g_knit_anchor forKey:@"anchor"];
+  [d setInteger:g_knit_inactive forKey:@"inactive"];
   NSMutableArray* exceptions = [NSMutableArray array];
   for (int i = 0; i < knit_app_exception_count(); i++)
     [exceptions addObject:@(knit_app_exception(i))];
@@ -188,7 +189,7 @@ static void knit_load_prefs(void) {
   NSUserDefaults* d = NSUserDefaults.standardUserDefaults;
   // Older versions saved a global chart even while app profiles overrode it.
   // A missing mode therefore migrates to By App, preserving those sweaters.
-  [d registerDefaults:@{ @"on": @YES, @"yarn": @0, @"basket": @3, @"width": @12.0f, @"gauge": @6.0f, @"chart": @"none", @"patternByApp": @YES, @"anchor": @0, @"appsOnByDefault": @YES, @"appExceptions": @[] }];
+  [d registerDefaults:@{ @"on": @YES, @"yarn": @0, @"basket": @3, @"width": @12.0f, @"gauge": @6.0f, @"chart": @"none", @"patternByApp": @YES, @"anchor": @0, @"inactive": @(KNIT_INACTIVE_SAME), @"appsOnByDefault": @YES, @"appExceptions": @[] }];
   char buf[128];
 
   NSInteger y = [d integerForKey:@"yarn"];
@@ -222,6 +223,10 @@ static void knit_load_prefs(void) {
 
   knit_apply([d integerForKey:@"anchor"] == KNIT_ANCHOR_CENTRE
              ? "anchor=centre" : "anchor=corner");
+
+  NSInteger inactive = [d integerForKey:@"inactive"];
+  knit_apply(inactive == KNIT_INACTIVE_GREY ? "inactive=grey"
+             : inactive == KNIT_INACTIVE_BARE ? "inactive=bare" : "inactive=same");
 
   knit_apply([d boolForKey:@"on"] ? "knit=on" : "knit=off");
 
@@ -603,6 +608,22 @@ static void knit_load_prefs(void) {
     [sizes addItem:[NSMenuItem separatorItem]];
     [self add:sizes title:[NSString stringWithFormat:@"Custom · %g rows", g_knit.rows]
         arg:[NSString stringWithFormat:@"gauge=%g", g_knit.rows] on:YES];
+  }
+
+  NSMenu* inactive = [self submenu:menu title:@"Inactive Windows"];
+  const struct { const char* name; const char* arg; int value; const char* tip; } inactiveChoices[] = {
+    { "Same Sweater", "inactive=same", KNIT_INACTIVE_SAME,
+      "Every window wears its sweater." },
+    { "Black and White", "inactive=grey", KNIT_INACTIVE_GREY,
+      "Windows in the background wear their sweater in black and white." },
+    { "No Sweater", "inactive=bare", KNIT_INACTIVE_BARE,
+      "Only the window you are using wears a sweater." },
+  };
+  for (size_t i = 0; i < sizeof inactiveChoices / sizeof inactiveChoices[0]; i++) {
+    NSMenuItem* choice = [self add:inactive title:@(inactiveChoices[i].name)
+                               arg:@(inactiveChoices[i].arg)
+                                on:g_knit_inactive == inactiveChoices[i].value];
+    choice.toolTip = @(inactiveChoices[i].tip);
   }
 
   [menu addItem:[NSMenuItem separatorItem]];

@@ -34,6 +34,8 @@ Click the yarn icon in your menu bar to change the style, pattern, border width,
 
 To leave an app bare, open **Apps** and untick it. Its windows lose their sweater straight away, everything else stays as it is, and it stays off until you tick it again, even after a restart. Only want sweaters on a few apps? Choose **Turn Off for All Apps**, then tick the ones you like. Apps you open later start off too.
 
+**Inactive Windows** sets what the windows behind the one you're using wear: the same sweater, the same sweater in black and white, or no sweater at all.
+
 **By App** gives each app its own sweater. **Zigzag** gives them all a softer, matching cream zigzag in colours taken from their icons. Try both and see what you like.
 
 If macOS asks for Accessibility access, enable Window Sweaters in **System Settings → Privacy & Security → Accessibility** so it can follow which window is focused.

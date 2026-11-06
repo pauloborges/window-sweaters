@@ -16,6 +16,7 @@ int g_knit_stitch = KNIT_STOCKINETTE;
 int g_knit_basket = 3;
 int g_knit_anchor = KNIT_ANCHOR_CORNER;
 float g_knit_dim = 0.f;   // unfocused windows look identical by default
+int g_knit_inactive = KNIT_INACTIVE_SAME;
 bool g_knit_on = true;
 int knit_tile_scale_override = 0;   // 0 = auto
 int knit_interp_override = -1;      // -1 = high
@@ -181,7 +182,43 @@ static void knit_lay(CGMutablePathRef path, int ncols, int nrows,
 // Internal cache key for single-colour knitted corner patches.
 enum { KNIT_PATCH_CHART = -2 };
 
-struct knit_tile { float band; uint32_t color; int chart; CGImageRef img; float w, h; };
+struct knit_tile { float band; uint32_t color; int chart; CGImageRef img; float w, h; bool grey; };
+
+// Gamma-encoded Rec. 601 luma, 0..255, from 8-bit channels.
+static uint8_t knit_luma(int r, int g, int b) {
+  return (uint8_t)((299 * r + 587 * g + 114 * b + 500) / 1000);
+}
+
+// The same colour in black and white. Alpha is kept.
+static uint32_t knit_grey(uint32_t argb) {
+  uint32_t y = knit_luma((argb >> 16) & 255, (argb >> 8) & 255, argb & 255);
+  return (argb & 0xff000000u) | (y << 16) | (y << 8) | y;
+}
+
+// A black-and-white copy of a colour tile. Each pixel gets its luma in all
+// three channels and keeps its alpha, so anti-aliased edges are unchanged.
+// The data is premultiplied, so the luma of the channels is premultiplied too.
+static struct knit_tile knit_make_grey(struct knit_tile source) {
+  struct knit_tile t = source;
+  t.img = NULL;
+  t.grey = true;
+  size_t w = CGImageGetWidth(source.img), h = CGImageGetHeight(source.img);
+  uint32_t* px = calloc(w * h, sizeof *px);
+  if (!px) return t;
+  CGColorSpaceRef rgb = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+  CGContextRef c = CGBitmapContextCreate(px, w, h, 8, w * 4, rgb,
+      kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host);
+  if (c) {
+    CGContextSetBlendMode(c, kCGBlendModeCopy);
+    CGContextDrawImage(c, CGRectMake(0, 0, w, h), source.img);
+    for (size_t i = 0; i < w * h; i++) px[i] = knit_grey(px[i]);
+    t.img = CGBitmapContextCreateImage(c);
+    CGContextRelease(c);
+  }
+  CGColorSpaceRelease(rgb);
+  free(px);
+  return t;
+}
 
 // Render one seamless tile.
 //
@@ -477,19 +514,46 @@ void knit_flush_cache(void) {
   pthread_mutex_unlock(&g_cache_lock);
 }
 
-static struct knit_tile knit_get_tile(float band, uint32_t color, int chart) {
-  band = roundf(band * 2.f) / 2.f;
-  pthread_mutex_lock(&g_cache_lock);
+// Call with g_cache_lock held. A hit is retained for the caller.
+static bool knit_find_tile(float band, uint32_t color, int chart, bool grey,
+                           struct knit_tile* found) {
   for (int i = 0; i < g_cache_n; i++) {
     if (g_cache[i].band == band && g_cache[i].color == color
-        && g_cache[i].chart == chart) {
-      struct knit_tile t = g_cache[i];
-      CGImageRetain(t.img); // caller owns its image across cache flush/eviction
-      pthread_mutex_unlock(&g_cache_lock);
-      return t;
+        && g_cache[i].chart == chart && g_cache[i].grey == grey) {
+      *found = g_cache[i];
+      CGImageRetain(found->img); // caller owns its image across cache flush/eviction
+      return true;
     }
   }
-  struct knit_tile t = knit_make_tile(band, color, chart);
+  return false;
+}
+
+static struct knit_tile knit_get_tile(float band, uint32_t color, int chart, bool grey) {
+  band = roundf(band * 2.f) / 2.f;
+  struct knit_tile t;
+  pthread_mutex_lock(&g_cache_lock);
+  if (knit_find_tile(band, color, chart, grey, &t)) {
+    pthread_mutex_unlock(&g_cache_lock);
+    return t;
+  }
+  struct knit_tile source = {0};
+  if (grey) {
+    // The lock is not recursive. Get the colour tile without it, then look
+    // again, because another thread can add the grey tile in that time.
+    pthread_mutex_unlock(&g_cache_lock);
+    source = knit_get_tile(band, color, chart, false);
+    if (!source.img) return source;
+    pthread_mutex_lock(&g_cache_lock);
+    if (knit_find_tile(band, color, chart, grey, &t)) {
+      pthread_mutex_unlock(&g_cache_lock);
+      CGImageRelease(source.img);
+      return t;
+    }
+    t = knit_make_grey(source);
+    CGImageRelease(source.img);
+  } else {
+    t = knit_make_tile(band, color, chart);
+  }
   if (!t.img) { pthread_mutex_unlock(&g_cache_lock); return t; }
   if (g_cache_n == KNIT_CACHE_LEN) {              // full: drop the oldest
     CGImageRelease(g_cache[0].img);
@@ -504,6 +568,12 @@ static struct knit_tile knit_get_tile(float band, uint32_t color, int chart) {
 
 void knit_draw(CGContextRef ctx, CGRect win, float radius, float band,
                uint32_t color, int chart, float dim, float tuck) {
+  knit_draw_styled(ctx, win, radius, band, color, chart, dim, tuck, false);
+}
+
+void knit_draw_styled(CGContextRef ctx, CGRect win, float radius, float band,
+                      uint32_t color, int chart, float dim, float tuck,
+                      bool greyscale) {
   if (!ctx || !isfinite(band) || !isfinite(radius) || !isfinite(tuck)
       || !isfinite(win.origin.x) || !isfinite(win.origin.y)
       || !isfinite(win.size.width) || !isfinite(win.size.height)
@@ -534,12 +604,12 @@ void knit_draw(CGContextRef ctx, CGRect win, float radius, float band,
   bool solid_corners = chart >= 0 && chart < g_chart_count && g_charts[chart].solid_corners;
   uint32_t corner_color = solid_corners && g_charts[chart].corner_color
                             ? g_charts[chart].corner_color : color;
-  struct knit_tile t = knit_get_tile(band, color, chart);
+  struct knit_tile t = knit_get_tile(band, color, chart, greyscale);
   if (!t.img) { CGContextRestoreGState(ctx); return; }
   struct knit_tile cuff_tile = {0};
   CGMutablePathRef cuff_ring = NULL;
   if (chart >= 0 && chart < g_chart_count && g_charts[chart].cuff_color) {
-    cuff_tile = knit_get_tile(band, g_charts[chart].cuff_color, KNIT_PATCH_CHART);
+    cuff_tile = knit_get_tile(band, g_charts[chart].cuff_color, KNIT_PATCH_CHART, greyscale);
     if (cuff_tile.img) {
       float width = band / 3.f;
       cuff_ring = CGPathCreateMutable();
@@ -549,7 +619,7 @@ void knit_draw(CGContextRef ctx, CGRect win, float radius, float band,
     }
   }
   struct knit_tile patch = {0};
-  if (solid_corners) patch = knit_get_tile(band, corner_color, KNIT_PATCH_CHART);
+  if (solid_corners) patch = knit_get_tile(band, corner_color, KNIT_PATCH_CHART, greyscale);
   CGContextSetAlpha(ctx, 1.f);   // the band is always fully opaque
   CGContextSetInterpolationQuality(ctx, knit_interp_override < 0
                                    ? kCGInterpolationHigh
@@ -618,7 +688,7 @@ void knit_draw(CGContextRef ctx, CGRect win, float radius, float band,
     // Opaque backing also covers image-sampling slivers at tile/curve edges.
     // Its clip is one narrow side, never the full window backing store.
     float a, r, g, b;
-    colors_from_hex(corner_color, &a, &r, &g, &b);
+    colors_from_hex(greyscale ? knit_grey(corner_color) : corner_color, &a, &r, &g, &b);
     CGContextSetRGBFillColor(ctx, r * 0.96f, g * 0.96f, b * 0.96f, 1.f);
     CGContextFillRect(ctx, CGRectMake(0.f, 0.f, L, d));
     if (patch.img) {

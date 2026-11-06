@@ -85,10 +85,25 @@ uint32_t knit_zigzag_contrast(uint32_t base);
 void knit_draw(CGContextRef ctx, CGRect win, float radius, float band,
                uint32_t color, int chart, float dim, float tuck);
 
+/// Like knit_draw. If `greyscale` is true, the band is drawn in black and
+/// white. Every yarn is grey: the base, the chart, the cuff and the corners.
+/// Grey tiles are cached apart from the colour tiles.
+void knit_draw_styled(CGContextRef ctx, CGRect win, float radius, float band,
+                      uint32_t color, int chart, float dim, float tuck,
+                      bool greyscale);
+
 /// How much an unfocused window's band is darkened, 0..1. This darkens rather
 /// than fading: the band stays fully opaque at any value, so the desktop never
 /// shows through it. 0 makes every window identical.
 extern float g_knit_dim;
+
+/// What an unfocused window wears.
+///
+///   KNIT_INACTIVE_SAME  the same sweater as a focused window
+///   KNIT_INACTIVE_GREY  the same sweater, in black and white
+///   KNIT_INACTIVE_BARE  no sweater; only the focused window wears one
+enum knit_inactive { KNIT_INACTIVE_SAME = 0, KNIT_INACTIVE_GREY, KNIT_INACTIVE_BARE };
+extern int g_knit_inactive;
 
 /// Discard every cached tile. Call after changing the gauge, stitch or basket.
 void knit_flush_cache(void);
